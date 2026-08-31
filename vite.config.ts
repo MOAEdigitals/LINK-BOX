@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/LINK-BOX/'
+    base: '/LINK-BOX/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
