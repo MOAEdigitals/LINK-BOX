@@ -256,7 +256,7 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
 
               <div className="flex gap-3">
                 {thumbnail ? (
-                  <div className="w-24 h-18 shrink-0 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 relative group">
+                  <div className="w-24 h-20 shrink-0 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 relative group">
                     <img
                       src={thumbnail}
                       alt="Thumbnail preview"
@@ -264,15 +264,22 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
                       className="w-full h-full object-cover"
                       onError={() => setThumbnail('')}
                     />
+                    {['youtube', 'tiktok', 'instagram', 'facebook', 'vimeo'].includes(platform) && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+                        <div className="w-7 h-7 rounded-full bg-white/90 text-slate-950 flex items-center justify-center shadow-md">
+                          <span className="text-2xs font-black ml-0.5">▶</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="w-24 h-18 shrink-0 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-slate-500 text-xs">
+                  <div className="w-24 h-20 shrink-0 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-slate-500 text-xs">
                     <LinkIcon className="w-5 h-5 mb-1 opacity-50" />
                     <span>No Image</span>
                   </div>
                 )}
 
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <div className="flex-1 min-w-0 flex flex-col justify-center space-y-1">
                   <input
                     type="text"
                     id="link-title-preview-input"
@@ -281,16 +288,15 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
                     placeholder="Enter or edit link title..."
                     className="font-semibold text-sm text-slate-100 bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 focus:outline-none truncate w-full"
                   />
-                  {author && (
-                    <p className="text-xs text-slate-400 mt-0.5 truncate">
-                      by <span className="font-medium text-slate-300">{author}</span>
+                  {description && description !== title && (
+                    <p className="text-2xs text-slate-400 line-clamp-2 leading-relaxed">
+                      {description}
                     </p>
                   )}
-                  {siteName && (
-                    <p className="text-2xs text-slate-500 uppercase tracking-wider mt-0.5 truncate">
-                      {siteName}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2 text-2xs text-slate-400">
+                    {author && <span className="text-indigo-400">@{author}</span>}
+                    {siteName && <span className="uppercase tracking-wider">{siteName}</span>}
+                  </div>
                 </div>
               </div>
             </div>

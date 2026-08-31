@@ -12,6 +12,19 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Decode basic HTML entities
+  function decodeHtmlEntities(str: string) {
+    return str
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  }
+
   // Helper to detect platform
   function detectPlatform(urlStr: string) {
     try {
@@ -53,6 +66,47 @@ async function startServer() {
     return null;
   }
 
+  // Helper to extract Instagram shortcode
+  function getInstagramShortcode(urlStr: string): string | null {
+    try {
+      const match = urlStr.match(/(?:reel|p|tv|share\/reel)\/([A-Za-z0-9_-]+)/i);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Image proxy endpoint to bypass hotlink / Referer restrictions from CDNs
+  app.get('/api/proxy-image', async (req, res) => {
+    const rawUrl = req.query.url;
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      return res.status(400).send('Image URL required');
+    }
+
+    try {
+      const imgRes = await fetch(rawUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!imgRes.ok) {
+        return res.status(imgRes.status).send('Failed to fetch image');
+      }
+
+      const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      const arrayBuffer = await imgRes.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch (err) {
+      res.status(500).send('Error proxying image');
+    }
+  });
+
   // Metadata endpoint
   app.get('/api/metadata', async (req, res) => {
     const rawUrl = req.query.url;
@@ -76,7 +130,7 @@ async function startServer() {
       let author = '';
       let favicon = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=128`;
 
-      // 1. Specialized handling: YouTube
+      // 1. Specialized handling: YouTube & YouTube Shorts
       if (platform === 'youtube') {
         const ytId = getYouTubeId(targetUrl);
         if (ytId) {
@@ -88,7 +142,7 @@ async function startServer() {
             { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(4000) }
           );
           if (oembedRes.ok) {
-            const data = await oembedRes.json() as any;
+            const data = (await oembedRes.json()) as any;
             title = data.title || title;
             author = data.author_name || author;
             if (data.thumbnail_url) thumbnail = data.thumbnail_url;
@@ -96,7 +150,7 @@ async function startServer() {
         } catch {}
       }
 
-      // 2. Specialized handling: TikTok
+      // 2. Specialized handling: TikTok (Video & Caption Extraction)
       else if (platform === 'tiktok') {
         try {
           const oembedRes = await fetch(
@@ -104,15 +158,71 @@ async function startServer() {
             { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(4000) }
           );
           if (oembedRes.ok) {
-            const data = await oembedRes.json() as any;
-            title = data.title || title;
-            author = data.author_name || author;
+            const data = (await oembedRes.json()) as any;
+            if (data.title) {
+              title = data.title;
+              description = data.title;
+            }
+            if (data.author_name) author = data.author_name;
             if (data.thumbnail_url) thumbnail = data.thumbnail_url;
           }
         } catch {}
       }
 
-      // 3. Specialized handling: Vimeo
+      // 3. Specialized handling: Instagram (Reels, Posts, Videos)
+      else if (platform === 'instagram') {
+        const shortcode = getInstagramShortcode(targetUrl);
+
+        // 3a. Try Instagram captioned embed HTML
+        if (shortcode) {
+          try {
+            const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
+            const embedRes = await fetch(embedUrl, {
+              headers: {
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              },
+              signal: AbortSignal.timeout(4500),
+            });
+
+            if (embedRes.ok) {
+              const html = await embedRes.text();
+
+              // Extract poster image
+              const imgMatch =
+                html.match(/class=["']EmbeddedMediaImage["'][^>]*src=["']([^"']+)["']/i) ||
+                html.match(/<img[^>]*src=["'](https:\/\/[^"']*cdninstagram\.com[^"']+)["']/i) ||
+                html.match(/<img[^>]*src=["'](https:\/\/[^"']*fbcdn\.net[^"']+)["']/i);
+              if (imgMatch && imgMatch[1]) {
+                thumbnail = decodeHtmlEntities(imgMatch[1]);
+              }
+
+              // Extract caption text
+              const captionMatch =
+                html.match(/class=["']Caption["'][^>]*>([\s\S]*?)<\/div>/i) ||
+                html.match(/class=["']CaptionText["'][^>]*>([\s\S]*?)<\/div>/i);
+              if (captionMatch && captionMatch[1]) {
+                const cleanedCaption = captionMatch[1].replace(/<[^>]+>/g, '').trim();
+                if (cleanedCaption) {
+                  title = cleanedCaption;
+                  description = cleanedCaption;
+                }
+              }
+
+              // Extract username/author
+              const authorMatch =
+                html.match(/class=["']UsernameText["'][^>]*>([^<]+)<\/span>/i) ||
+                html.match(/data-ios-link=["']user\?username=([^"']+)["']/i);
+              if (authorMatch && authorMatch[1]) {
+                author = authorMatch[1].trim();
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // 4. Specialized handling: Vimeo
       else if (platform === 'vimeo') {
         try {
           const oembedRes = await fetch(
@@ -120,7 +230,7 @@ async function startServer() {
             { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(4000) }
           );
           if (oembedRes.ok) {
-            const data = await oembedRes.json() as any;
+            const data = (await oembedRes.json()) as any;
             title = data.title || title;
             author = data.author_name || author;
             if (data.thumbnail_url) thumbnail = data.thumbnail_url;
@@ -129,7 +239,7 @@ async function startServer() {
         } catch {}
       }
 
-      // 4. Specialized handling: Twitter / X
+      // 5. Specialized handling: Twitter / X
       else if (platform === 'x') {
         try {
           const oembedRes = await fetch(
@@ -137,21 +247,42 @@ async function startServer() {
             { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(4000) }
           );
           if (oembedRes.ok) {
-            const data = await oembedRes.json() as any;
+            const data = (await oembedRes.json()) as any;
             author = data.author_name || author;
-            // Clean up html snippet title
             if (data.html) {
               const textMatch = data.html.match(/<p[^>]*>(.*?)<\/p>/i);
               if (textMatch) {
-                title = textMatch[1].replace(/<[^>]+>/g, '');
+                const tweetText = textMatch[1].replace(/<[^>]+>/g, '').trim();
+                title = tweetText;
+                description = tweetText;
               }
             }
           }
         } catch {}
       }
 
-      // If title or thumbnail still missing, scrape OpenGraph HTML
-      if (!title || !thumbnail || platform === 'instagram' || platform === 'facebook' || platform === 'reddit' || platform === 'pinterest' || platform === 'web' || platform === 'threads' || platform === 'linkedin') {
+      // 6. Universal Microlink OpenGraph API fallback (High-res video poster and caption for IG, FB, TikTok, X)
+      if (!thumbnail || !title || platform === 'instagram' || platform === 'facebook') {
+        try {
+          const microRes = await fetch(`https://api.microlink.io?url=${encodeURIComponent(targetUrl)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (microRes.ok) {
+            const microData = (await microRes.json()) as any;
+            if (microData.status === 'success' && microData.data) {
+              const d = microData.data;
+              if (d.image?.url && !thumbnail) thumbnail = d.image.url;
+              if (d.description && !description) description = d.description;
+              if (d.title && (!title || title === siteName)) title = d.title;
+              if (d.author && !author) author = d.author;
+            }
+          }
+        } catch {}
+      }
+
+      // 7. Scrape Direct HTML OpenGraph & Twitter tags
+      if (!title || !thumbnail || !description) {
         try {
           const htmlRes = await fetch(targetUrl, {
             headers: {
@@ -159,7 +290,7 @@ async function startServer() {
                 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php) Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
               Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(4500),
             redirect: 'follow',
           });
 
@@ -205,23 +336,19 @@ async function startServer() {
                 description = decodeHtmlEntities(ogDesc.trim());
               }
             }
-
-            // Extract site name
-            const ogSiteName =
-              html.match(/<meta\s+property=["']og:site_name["']\s+content=["'](.*?)["']/i)?.[1] ||
-              html.match(/<meta\s+content=["'](.*?)["']\s+property=["']og:site_name["']/i)?.[1];
-            if (ogSiteName) {
-              // use nicer site name
-            }
           }
         } catch {}
       }
 
       // Default fallback title from path/domain if empty
       if (!title) {
-        title = urlObj.pathname.length > 1
-          ? decodeURIComponent(urlObj.pathname.split('/').filter(Boolean).pop() || siteName).replace(/[-_]/g, ' ')
-          : siteName;
+        title =
+          urlObj.pathname.length > 1
+            ? decodeURIComponent(urlObj.pathname.split('/').filter(Boolean).pop() || siteName).replace(
+                /[-_]/g,
+                ' '
+              )
+            : siteName;
         // Capitalize words
         title = title.charAt(0).toUpperCase() + title.slice(1);
       }
@@ -250,19 +377,6 @@ async function startServer() {
       });
     }
   });
-
-  // Decode basic HTML entities
-  function decodeHtmlEntities(str: string) {
-    return str
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
-  }
 
   // Vite middleware in dev or static files in prod
   if (process.env.NODE_ENV !== 'production') {

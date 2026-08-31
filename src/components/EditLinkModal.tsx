@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Category, SavedLink } from '../types';
 import { PlatformBadge } from './PlatformBadge';
-import { X, Check, Trash2, ExternalLink } from 'lucide-react';
+import { fetchMetadata } from '../lib/metadata';
+import { X, Trash2, ExternalLink, RotateCw, Image as ImageIcon } from 'lucide-react';
 
 interface EditLinkModalProps {
   isOpen: boolean;
@@ -21,23 +22,43 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
   onDelete,
 }) => {
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [notes, setNotes] = useState('');
   const [thumbnail, setThumbnail] = useState('');
+  const [author, setAuthor] = useState('');
+  const [isFetchingMeta, setIsFetchingMeta] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (link) {
       setTitle(link.title || '');
+      setDescription(link.description || '');
       setCategoryId(link.categoryId || '');
       setNotes(link.notes || '');
       setThumbnail(link.thumbnail || '');
+      setAuthor(link.author || '');
       setShowDeleteConfirm(false);
     }
   }, [link, isOpen]);
 
   if (!isOpen || !link) return null;
+
+  const handleRefetchMetadata = async () => {
+    try {
+      setIsFetchingMeta(true);
+      const meta = await fetchMetadata(link.url);
+      if (meta.title) setTitle(meta.title);
+      if (meta.description) setDescription(meta.description);
+      if (meta.thumbnail) setThumbnail(meta.thumbnail);
+      if (meta.author) setAuthor(meta.author);
+    } catch (err) {
+      console.error('Failed to refetch metadata:', err);
+    } finally {
+      setIsFetchingMeta(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,9 +68,11 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
       setIsSubmitting(true);
       await onUpdate(link.id, {
         title: title.trim(),
+        description: description.trim(),
         categoryId,
         notes: notes.trim() || undefined,
         thumbnail: thumbnail.trim() || undefined,
+        author: author.trim() || undefined,
       });
       onClose();
     } catch (err) {
@@ -72,10 +95,10 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs overflow-y-auto">
       <div 
         id="edit-link-modal-card" 
-        className="w-full max-w-lg bg-[#16191f] rounded-2xl shadow-2xl border border-slate-800 overflow-hidden text-slate-300"
+        className="w-full max-w-lg bg-[#16191f] rounded-2xl shadow-2xl border border-slate-800 overflow-hidden text-slate-300 my-6"
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#0f1115]/90">
           <div className="flex items-center gap-2.5">
@@ -92,9 +115,47 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* Thumbnail preview & refetch button */}
+          <div className="flex gap-4 p-3 bg-[#0f1115] rounded-xl border border-slate-800">
+            <div className="w-24 h-18 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 shrink-0 relative flex items-center justify-center">
+              {thumbnail ? (
+                <img
+                  src={thumbnail}
+                  alt="Thumbnail"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <ImageIcon className="w-6 h-6 text-slate-600" />
+              )}
+            </div>
+
+            <div className="flex-1 flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold text-slate-300 block">
+                  Media Preview & Caption
+                </span>
+                <span className="text-2xs text-slate-500 line-clamp-1 truncate max-w-xs">
+                  {link.url}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                id="refetch-link-meta-modal-btn"
+                onClick={handleRefetchMetadata}
+                disabled={isFetchingMeta}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 w-fit transition disabled:opacity-50"
+              >
+                <RotateCw className={`w-3.5 h-3.5 ${isFetchingMeta ? 'animate-spin text-indigo-400' : ''}`} />
+                <span>{isFetchingMeta ? 'Fetching...' : 'Re-fetch Video Metadata'}</span>
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Title
+              Title / Video Headline
             </label>
             <input
               id="edit-link-title-input"
@@ -108,20 +169,50 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Category
+              Caption / Description
             </label>
-            <select
-              id="edit-link-category-select"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-[#0c0d0f] border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-            >
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id} className="bg-[#16191f] text-slate-200">
-                  {cat.name}
-                </option>
-              ))}
-            </select>
+            <textarea
+              id="edit-link-desc-input"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Caption or description from post..."
+              className="w-full px-3.5 py-2.5 bg-[#0c0d0f] border border-slate-700 rounded-xl text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Category
+              </label>
+              <select
+                id="edit-link-category-select"
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-[#0c0d0f] border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              >
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id} className="bg-[#16191f] text-slate-200">
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Creator / Author
+              </label>
+              <input
+                id="edit-link-author-input"
+                type="text"
+                value={author}
+                onChange={(e) => setAuthor(e.target.value)}
+                placeholder="@username"
+                className="w-full px-3.5 py-2.5 bg-[#0c0d0f] border border-slate-700 rounded-xl text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              />
+            </div>
           </div>
 
           <div>
@@ -138,7 +229,7 @@ export const EditLinkModal: React.FC<EditLinkModalProps> = ({
             />
           </div>
 
-          <div className="pt-2">
+          <div className="pt-1">
             <a
               href={link.url}
               target="_blank"

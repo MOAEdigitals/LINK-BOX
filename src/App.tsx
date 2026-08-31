@@ -28,8 +28,10 @@ import { EditLinkModal } from './components/EditLinkModal';
 import { CategoryModal } from './components/CategoryModal';
 import { PwaGuideModal } from './components/PwaInstallBanner';
 import { ImportExportModal } from './components/ImportExportModal';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
 import { EmptyState } from './components/EmptyState';
 import { ToastContainer } from './components/Toast';
+import { fetchMetadata } from './lib/metadata';
 import { Plus, Sparkles, Filter, AlertTriangle } from 'lucide-react';
 
 export default function App() {
@@ -45,6 +47,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addModalInitialUrl, setAddModalInitialUrl] = useState('');
   const [editingLink, setEditingLink] = useState<SavedLink | null>(null);
+  const [playingVideoLink, setPlayingVideoLink] = useState<SavedLink | null>(null);
   
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -263,6 +266,25 @@ export default function App() {
     showToast('Updated link');
   };
 
+  const handleRefreshMetadata = async (link: SavedLink) => {
+    try {
+      showToast('Fetching latest thumbnail & caption...', 'info');
+      const meta = await fetchMetadata(link.url);
+      await updateLink(link.id, {
+        thumbnail: meta.thumbnail || link.thumbnail,
+        description: meta.description || link.description,
+        title: meta.title && meta.title !== 'web' ? meta.title : link.title,
+        author: meta.author || link.author,
+        siteName: meta.siteName || link.siteName,
+        favicon: meta.favicon || link.favicon,
+      });
+      await loadData();
+      showToast('Preview refreshed successfully!');
+    } catch (err) {
+      showToast('Could not refresh metadata', 'error');
+    }
+  };
+
   const handleDeleteLink = async (id: string) => {
     const deletedItem = links.find((l) => l.id === id);
     await deleteLink(id);
@@ -383,6 +405,8 @@ export default function App() {
                   onEdit={(l) => setEditingLink(l)}
                   onDelete={handleDeleteLink}
                   onCopySuccess={() => showToast('Link URL copied to clipboard')}
+                  onPlayVideo={(l) => setPlayingVideoLink(l)}
+                  onRefreshMetadata={handleRefreshMetadata}
                 />
               );
             })}
@@ -400,6 +424,8 @@ export default function App() {
                   onEdit={(l) => setEditingLink(l)}
                   onDelete={handleDeleteLink}
                   onCopySuccess={() => showToast('Link URL copied to clipboard')}
+                  onPlayVideo={(l) => setPlayingVideoLink(l)}
+                  onRefreshMetadata={handleRefreshMetadata}
                 />
               );
             })}
@@ -424,6 +450,12 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      <VideoPlayerModal
+        isOpen={Boolean(playingVideoLink)}
+        link={playingVideoLink}
+        onClose={() => setPlayingVideoLink(null)}
+      />
+
       <AddLinkModal
         isOpen={isAddModalOpen}
         onClose={() => {

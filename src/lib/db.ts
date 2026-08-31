@@ -24,11 +24,66 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'cat-watch-later', name: 'Watch Later', color: '#ec4899', icon: 'Clock', order: 4, createdAt: 1700000004000 },
 ];
 
+export const DEFAULT_LINKS: SavedLink[] = [
+  {
+    id: 'link-seed-1',
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    title: '15-Minute Creamy Garlic Butter Pasta with Crispy Herbs',
+    description: 'Quick and delicious weeknight dinner recipe! Step-by-step technique for velvety garlic butter sauce, crispy rosemary, and al dente pasta perfection.',
+    thumbnail: 'https://images.unsplash.com/photo-1621996346565-e3d5d628120e?w=800&auto=format&fit=crop&q=80',
+    categoryId: 'cat-cooking',
+    platform: 'youtube',
+    siteName: 'YouTube',
+    author: 'ChefTable',
+    createdAt: Date.now() - 3600000 * 2,
+    isPinned: true,
+  },
+  {
+    id: 'link-seed-2',
+    url: 'https://www.tiktok.com/@fitnesslab/video/7234567890',
+    title: '5-Minute Morning Mobility & Core Activation Routine',
+    description: 'Do this routine right after waking up to release tight hip flexors, activate deep core muscles, and boost full-body circulation without any equipment! #mobility #workout',
+    thumbnail: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80',
+    categoryId: 'cat-fitness',
+    platform: 'tiktok',
+    siteName: 'TikTok',
+    author: 'fitnesslab',
+    createdAt: Date.now() - 3600000 * 5,
+  },
+  {
+    id: 'link-seed-3',
+    url: 'https://www.instagram.com/reel/C8k9LxPOz21/',
+    title: 'Minimalist Workspace Setup & Aesthetic Desk Organization 2025',
+    description: 'Clean workspace essentials: 4K OLED display, wireless walnut wrist rest, warm ambient diffused light bars, and zero visible cable clutter.',
+    thumbnail: 'https://images.unsplash.com/photo-1593062096033-9a26b09da705?w=800&auto=format&fit=crop&q=80',
+    categoryId: 'cat-inspiration',
+    platform: 'instagram',
+    siteName: 'Instagram',
+    author: 'designspaces',
+    createdAt: Date.now() - 3600000 * 12,
+  },
+  {
+    id: 'link-seed-4',
+    url: 'https://www.facebook.com/reel/9876543210',
+    title: 'Next-Gen Fullstack Architecture & Edge Server Actions',
+    description: 'Deep dive into modern web bundling, streaming SSR, and edge micro-caches to achieve sub-100ms response times globally.',
+    thumbnail: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80',
+    categoryId: 'cat-tech',
+    platform: 'facebook',
+    siteName: 'Facebook',
+    author: 'TechFoundry',
+    createdAt: Date.now() - 3600000 * 24,
+  },
+];
+
 export async function initializeDatabase(): Promise<void> {
-  const count = await db.categories.count();
-  if (count === 0) {
-    // Use bulkPut to idempotently insert default categories and avoid duplicate key ConstraintError
+  const catCount = await db.categories.count();
+  if (catCount === 0) {
     await db.categories.bulkPut(DEFAULT_CATEGORIES);
+  }
+  const linkCount = await db.links.count();
+  if (linkCount === 0) {
+    await db.links.bulkPut(DEFAULT_LINKS);
   }
 }
 

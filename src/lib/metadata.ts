@@ -47,6 +47,15 @@ export function getCleanUrl(urlStr: string): string {
   return cleaned;
 }
 
+// Proxies remote images if needed to bypass CDN Referer protections
+export function getSafeImageUrl(imgUrl?: string): string {
+  if (!imgUrl) return '';
+  if (imgUrl.startsWith('data:') || imgUrl.startsWith('/') || imgUrl.startsWith('blob:')) {
+    return imgUrl;
+  }
+  return imgUrl;
+}
+
 export async function fetchMetadata(rawUrl: string): Promise<MetadataResult> {
   const url = getCleanUrl(rawUrl);
   const platform = detectPlatform(url);
@@ -71,14 +80,14 @@ export async function fetchMetadata(rawUrl: string): Promise<MetadataResult> {
     const ytId = getYouTubeVideoId(url);
     if (ytId) {
       defaultResult.thumbnail = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
-      defaultResult.title = `YouTube Video (${ytId})`;
+      defaultResult.title = `YouTube Video`;
     }
   }
 
-  // Try fetching from our server metadata endpoint
+  // 1. Try fetching from our server metadata endpoint first
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
     const res = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`, {
       signal: controller.signal,
     });
@@ -86,22 +95,41 @@ export async function fetchMetadata(rawUrl: string): Promise<MetadataResult> {
 
     if (res.ok) {
       const data = await res.json();
-      return {
-        url: data.url || url,
-        title: data.title || defaultResult.title,
-        description: data.description || '',
-        thumbnail: data.thumbnail || defaultResult.thumbnail,
-        siteName: data.siteName || hostname,
-        platform: data.platform || platform,
-        author: data.author || '',
-        favicon: data.favicon || defaultResult.favicon,
-      };
+      if (data.title || data.thumbnail || data.description) {
+        return {
+          url: data.url || url,
+          title: data.title || defaultResult.title,
+          description: data.description || '',
+          thumbnail: data.thumbnail || defaultResult.thumbnail,
+          siteName: data.siteName || hostname,
+          platform: data.platform || platform,
+          author: data.author || '',
+          favicon: data.favicon || defaultResult.favicon,
+        };
+      }
     }
   } catch (err) {
-    console.warn('Backend metadata fetch error or timeout, using local fallback:', err);
+    console.warn('Backend metadata fetch error or timeout, trying client fallback:', err);
   }
 
-  // Client-side oEmbed fallback for YouTube if server is unavailable
+  // 2. Client-side fallback for TikTok oEmbed
+  if (platform === 'tiktok') {
+    try {
+      const res = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.title) {
+          defaultResult.title = data.title;
+          defaultResult.description = data.title;
+        }
+        if (data.thumbnail_url) defaultResult.thumbnail = data.thumbnail_url;
+        if (data.author_name) defaultResult.author = data.author_name;
+        return defaultResult;
+      }
+    } catch {}
+  }
+
+  // 3. Client-side fallback for YouTube oEmbed
   if (platform === 'youtube') {
     try {
       const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
@@ -110,9 +138,27 @@ export async function fetchMetadata(rawUrl: string): Promise<MetadataResult> {
         if (data.title) defaultResult.title = data.title;
         if (data.thumbnail_url) defaultResult.thumbnail = data.thumbnail_url;
         if (data.author_name) defaultResult.author = data.author_name;
+        return defaultResult;
       }
     } catch {}
   }
+
+  // 4. Client-side fallback for Instagram / Facebook / Web via public open-graph API
+  try {
+    const microRes = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`);
+    if (microRes.ok) {
+      const microData = await microRes.json();
+      if (microData.status === 'success' && microData.data) {
+        const d = microData.data;
+        if (d.title) defaultResult.title = d.title;
+        if (d.description) defaultResult.description = d.description;
+        if (d.image?.url) defaultResult.thumbnail = d.image.url;
+        if (d.author) defaultResult.author = d.author;
+        if (d.publisher) defaultResult.siteName = d.publisher;
+        return defaultResult;
+      }
+    }
+  } catch {}
 
   return defaultResult;
 }
