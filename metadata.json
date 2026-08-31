@@ -1,0 +1,6 @@
+{
+  "name": "Link Saver & Organizer",
+  "description": "A minimalist web app and PWA to save, categorize, and browse links, videos, reels, and social posts with fast metadata previews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
